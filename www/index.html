@@ -286,8 +286,33 @@ textarea.inp{min-height:84px;resize:none}
 <input type="file" id="file" accept="image/*" hidden>
 <input type="file" id="imp" accept="application/json,.json" hidden>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 (()=>{
+/* ====== Conexión con Supabase: reemplaza estos dos valores ======
+   Los tomas de tu proyecto en Supabase -> Project Settings -> API:
+   SUPABASE_URL  = "Project URL"
+   SUPABASE_KEY  = "Publishable key" (empieza con sb_publishable_...)
+   Necesitas además tener activado: Authentication -> Sign In / Providers
+   -> Anonymous Sign-Ins. */
+const SUPABASE_URL='https://xbkscrcuktmeydotcxxj.supabase.co';
+const SUPABASE_KEY='sb_publishable_MifDVxX54L7M0rRgRUvwMg_Ko9_7IOS';
+const sb=(window.supabase&&SUPABASE_URL.startsWith('https://')&&!SUPABASE_URL.includes('TU_PROJECT_URL'))
+  ?window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,autoRefreshToken:true}})
+  :null;
+let sbUserId=null;
+async function ensureAuth(){
+  if(!sb)return false;
+  try{
+    let {data:{session}}=await sb.auth.getSession();
+    if(!session){
+      const {data,error}=await sb.auth.signInAnonymously();
+      if(error||!data.session)return false;
+      session=data.session;
+    }
+    sbUserId=session.user.id;return true;
+  }catch(e){return false}
+}
 const KEY='inv_app_v1';
 const CATS=[{n:'Aseo',e:'🧼'},{n:'Hogar',e:'🏠'},{n:'Ropa y Calzado',e:'👕'},{n:'Gimnasio',e:'🏋️'},{n:'Electrodomésticos',e:'🔌'},{n:'Comida',e:'🍎'},{n:'Bebida',e:'🥤'},{n:'Accesorios',e:'👜'},{n:'Belleza',e:'💄'},{n:'Electrónica',e:'🎧'},{n:'Juguetes',e:'🧸'},{n:'Papelería',e:'📝'},{n:'Mascotas',e:'🐾'},{n:'Ferretería',e:'🔧'},{n:'Jardinería',e:'🌱'},{n:'Bebés y niños',e:'🍼'},{n:'Deportes',e:'🏀'},{n:'Tecnología',e:'💻'},{n:'Otros',e:'📦'}];
 const CURS=['CUP','USD'];
@@ -380,6 +405,7 @@ function render(){
     .map(([k,l,i])=>`<button class="tb ${ui.tab===k?'on':''}" data-act="tab" data-id="${k}">${ic(i)}<span>${l}</span></button>`).join('');
   $('#fab').classList.toggle('on',ui.tab==='inv');
   $('#fab').innerHTML=ic('plus');
+  if(ui.tab==='more'&&state.storeId)refreshLinks();
 }
 const periodChips=(cur,act)=>`<div class="chips">${PERIODS.map(([k,l])=>`<button class="chip ${cur===k?'on':''}" data-act="${act}" data-id="${k}">${l}</button>`).join('')}</div>`;
 
@@ -475,6 +501,7 @@ function moreHTML(){
         <button class="lnk" style="margin-top:10px;color:var(--muted)" data-act="regenid">Generar otro ID</button>`
         :`<p class="muted" style="margin:0 0 12px;font-size:13px">Genera un identificador único para vincular esta tienda con tu app de finanzas.</p>
           <button class="btn full" data-act="genid">Generar ID</button>`}
+      <div id="linkbox">${linkBoxHTML()}</div>
     </div>
     <div class="opt"><div>${ic('palette')}<span>Apariencia</span></div>${seg([['auto','Automático'],['light','Claro'],['dark','Oscuro']],state.theme,'theme')}</div>
     <div class="opt"><div>${ic('coin')}<span>Moneda</span></div>${seg(CURS.map(c=>[c,c]),state.cur,'cur')}</div>
@@ -574,12 +601,21 @@ const ACT={
   storephoto:()=>{photoTarget='store';$('#file').click()},
   rmstorephoto:()=>{state.storeImg='';save();ACT.editstore();render()},
   onbphoto:()=>{photoTarget='onboard';$('#file').click()},
-  genid:()=>{
+  genid:async()=>{
     if(!navigator.onLine){toast('Necesitas conexión a internet para generar el ID');return}
+    if(!sb){toast('Falta configurar la conexión con la base de datos');return}
     toast('Verificando disponibilidad del ID…');
-    setTimeout(()=>{state.storeId=String(Math.floor(10000000+Math.random()*90000000));save();render();toast('ID generado: '+formatId(state.storeId))},900);
+    const ok=await ensureAuth();
+    if(!ok){toast('No se pudo conectar con el servidor');return}
+    for(let i=0;i<6;i++){
+      const id=String(Math.floor(10000000+Math.random()*90000000));
+      const {error}=await sb.from('stores').insert({id,name:state.store,currency:state.cur,owner_id:sbUserId});
+      if(!error){state.storeId=id;save();render();toast('ID generado: '+formatId(id));return}
+      if(error.code!=='23505'){toast('No se pudo generar el ID: '+error.message);return}
+    }
+    toast('No se pudo generar un ID disponible, intenta de nuevo');
   },
-  regenid:()=>ask('¿Generar otro ID?','Si ya usaste este ID en tu app de finanzas, tendrás que actualizarlo allí también.','Generar otro',()=>ACT.genid(),true),
+  regenid:()=>ask('¿Generar otro ID?','El ID anterior dejará de servir para esta tienda. Si ya lo usaste en tu app de finanzas, tendrás que actualizarlo allí también.','Generar otro',()=>ACT.genid(),true),
   copyid:()=>{
     if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(state.storeId).then(()=>toast('ID copiado')).catch(()=>toast('No se pudo copiar'));
     else toast('No se pudo copiar');
@@ -603,9 +639,11 @@ const ACT={
     if(!v||ov.qty<1||ov.qty>v.qty)return toast('No hay suficiente stock');
     const price=num(ov.price);if(price<=0)return toast('Escribe el precio de venta');
     v.qty-=ov.qty;
-    state.sales.unshift({id:uid(),pid:p.id,vid:v.id,name:p.name,variant:vlabel(v),qty:ov.qty,cost:p.cost,price,date:new Date().toISOString()});
+    const sale={id:uid(),pid:p.id,vid:v.id,name:p.name,variant:vlabel(v),qty:ov.qty,cost:p.cost,price,date:new Date().toISOString()};
+    state.sales.unshift(sale);
     save();const sold=ov.qty,nv=p.variants.find(x=>x.qty>0);
     ov.vid=(nv||v).id;ov.qty=1;renderOv();sellDom();toast(`Venta registrada: ${fmt(price*sold)} ${state.cur}`);
+    pushSale(sale);
   },
   restock:()=>{const p=prod(ov.id);
     openSheet(`<h3>Reabastecer</h3><p class="muted">Suma unidades al stock de ${esc(p.name)}.</p>
@@ -626,13 +664,29 @@ const ACT={
     if(p){let v=p.variants.find(x=>x.id===s.vid);if(v)v.qty+=s.qty;else p.variants.push({id:uid(),size:s.variant==='Único'?'':s.variant,color:'',qty:s.qty})}
     state.sales=state.sales.filter(x=>x.id!==id);save();closeSheet();render();toast(p?'Venta anulada y stock restaurado':'Venta anulada')},
   theme:id=>{state.theme=id;save();applyTheme();render()},
-  cur:id=>{state.cur=id;save();render()},
+  cur:id=>{state.cur=id;save();render();syncStoreMeta()},
   editstore:()=>openSheet(`<h3>Datos de la tienda</h3><p class="muted">El nombre y la foto aparecen en tu pantalla de inicio y en Configuración.</p>
     <div class="photorow"><button class="photo" data-act="storephoto">${state.storeImg?`<img src="${state.storeImg}" alt="">`:`<div>${ic('camera')}<br>Foto</div>`}</button>
       <div><p>Agrega una foto para identificar tu tienda.</p>${state.storeImg?'<button class="lnk" data-act="rmstorephoto">Quitar foto</button>':''}</div></div>
     <div class="field"><label>Nombre de tu tienda</label><input class="inp" id="sn" value="${esc(state.store)}" autocomplete="off"></div>
     <button class="btn full" data-act="savestore">Guardar</button>`),
-  savestore:()=>{const n=$('#sn').value.trim();if(!n)return toast('Escribe un nombre');state.store=n;save();closeSheet();render()},
+  savestore:()=>{const n=$('#sn').value.trim();if(!n)return toast('Escribe un nombre');state.store=n;save();closeSheet();render();syncStoreMeta()},
+  linkapprove:async id=>{
+    const ok=await ensureAuth();if(!ok){toast('No se pudo conectar');return}
+    const {error}=await sb.from('store_links').update({status:'approved',decided_at:new Date().toISOString()}).eq('id',id);
+    if(error){toast('No se pudo aprobar la solicitud');return}
+    toast('Dispositivo vinculado a tu tienda');refreshLinks();
+  },
+  linkreject:async id=>{
+    const ok=await ensureAuth();if(!ok){toast('No se pudo conectar');return}
+    const {error}=await sb.from('store_links').update({status:'rejected',decided_at:new Date().toISOString()}).eq('id',id);
+    if(!error){toast('Solicitud rechazada');refreshLinks()}
+  },
+  linkrevoke:id=>ask('¿Revocar acceso?','Ese dispositivo dejará de ver la información de tu tienda en Wallet.','Revocar',async()=>{
+    const ok=await ensureAuth();if(!ok){toast('No se pudo conectar');return}
+    const {error}=await sb.from('store_links').update({status:'revoked',decided_at:new Date().toISOString()}).eq('id',id);
+    if(!error){toast('Acceso revocado');refreshLinks()}
+  },true),
   export:()=>{const b=new Blob([JSON.stringify(state)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='inventario-respaldo.json';document.body.appendChild(a);a.click();a.remove();toast('Respaldo exportado')},
   import:()=>$('#imp').click(),
   demo:()=>ask('Cargar datos de ejemplo','Esto reemplaza lo que tienes ahora por productos y ventas de prueba.','Cargar',()=>{demo();save();render();toast('Datos de ejemplo cargados')}),
@@ -654,6 +708,55 @@ $('#file').addEventListener('change',e=>{
   const f=e.target.files[0];e.target.value='';if(!f)return;
   openCrop(f);
 });
+
+/* ---------- sincronización con Supabase ---------- */
+let linkRequests=null;
+async function syncStoreMeta(){
+  if(!sb||!state.storeId)return;
+  const ok=await ensureAuth();if(!ok)return;
+  try{await sb.from('stores').update({name:state.store,currency:state.cur}).eq('id',state.storeId)}catch(e){}
+}
+async function pushSale(s){
+  if(!sb||!state.storeId)return;
+  const ok=await ensureAuth();if(!ok)return;
+  try{
+    await sb.from('sales').insert({
+      store_id:state.storeId,
+      total:Math.round(s.qty*s.price*100)/100,
+      payment_method:'Efectivo',
+      items:[{name:s.name,variant:s.variant,qty:s.qty,price:s.price,cost:s.cost}]
+    });
+  }catch(e){}
+}
+async function loadLinks(){
+  if(!sb||!state.storeId)return[];
+  const ok=await ensureAuth();if(!ok)return[];
+  const {data,error}=await sb.from('store_links').select('*').eq('store_id',state.storeId).order('created_at',{ascending:false});
+  return error?[]:data;
+}
+async function refreshLinks(){
+  if(!state.storeId||!sb)return;
+  linkRequests=await loadLinks();
+  const b=$('#linkbox');if(b&&ui.tab==='more')b.innerHTML=linkBoxHTML();
+}
+function linkBoxHTML(){
+  if(!state.storeId)return'';
+  if(!sb)return `<p class="muted" style="font-size:13px;margin-top:10px">Configura la conexión con la base de datos para ver aquí las solicitudes de Wallet.</p>`;
+  if(linkRequests===null)return `<p class="muted" style="font-size:13px;margin-top:10px">Cargando solicitudes…</p>`;
+  const pend=linkRequests.filter(l=>l.status==='pending'),appr=linkRequests.filter(l=>l.status==='approved');
+  if(!pend.length&&!appr.length)return `<p class="muted" style="font-size:13px;margin-top:10px">Nadie ha pedido acceso a esta tienda todavía.</p>`;
+  return (pend.length?`<div class="h4" style="margin:18px 0 10px">Solicitudes pendientes</div>${pend.map(l=>`
+    <div class="row" style="align-items:flex-start">
+      <div class="rm"><div class="rn">${esc(l.device_label||'Dispositivo')}</div>
+        <div class="rs">Código: <b style="color:var(--ink)">${esc(l.code)}</b><br>Confírmalo contra el que ves en Wallet antes de aprobar.</div></div>
+      <div class="rr" style="flex-direction:row;gap:8px">
+        <button class="plus" style="background:var(--good)" data-act="linkapprove" data-id="${l.id}">${ic('plus')}</button>
+        <button class="plus" style="background:var(--bad)" data-act="linkreject" data-id="${l.id}">${ic('trash')}</button>
+      </div></div>`).join('')}`:'')
+    +(appr.length?`<div class="h4" style="margin:18px 0 10px">Dispositivos vinculados</div>${appr.map(l=>`
+    <div class="row"><div class="rm"><div class="rn">${esc(l.device_label||'Dispositivo')}</div><div class="rs">Con acceso a esta tienda en Wallet</div></div>
+      <button class="lnk" style="color:var(--bad)" data-act="linkrevoke" data-id="${l.id}">Revocar</button></div>`).join('')}`:'');
+}
 
 /* ---------- recorte de foto ---------- */
 let cropState=null,cropDrag=null,photoTarget=null,onbImg='';
@@ -724,6 +827,7 @@ function updateOnbPhoto(){const b=$('#onbphoto');if(b){b.innerHTML=onbImg?`<img 
 
 applyTheme();render();
 if(!state.onboarded)showOnb();
+if(sb)ensureAuth();
 })();
 </script>
 </body>
