@@ -300,18 +300,19 @@ const SUPABASE_KEY='sb_publishable_MifDVxX54L7M0rRgRUvwMg_Ko9_7IOS';
 const sb=(window.supabase&&SUPABASE_URL.startsWith('https://')&&!SUPABASE_URL.includes('TU_PROJECT_URL'))
   ?window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,autoRefreshToken:true}})
   :null;
-let sbUserId=null;
+let sbUserId=null,authError='';
 async function ensureAuth(){
-  if(!sb)return false;
+  if(!sb){authError='la conexión con Supabase no está configurada';return false}
   try{
     let {data:{session}}=await sb.auth.getSession();
     if(!session){
       const {data,error}=await sb.auth.signInAnonymously();
-      if(error||!data.session)return false;
+      if(error){authError=error.message||('error '+(error.status||'desconocido'));return false}
+      if(!data.session){authError='no se recibió sesión del servidor';return false}
       session=data.session;
     }
     sbUserId=session.user.id;return true;
-  }catch(e){return false}
+  }catch(e){authError=(e&&e.message)?e.message:'error de red al conectar';return false}
 }
 const KEY='inv_app_v1';
 const CATS=[{n:'Aseo',e:'🧼'},{n:'Hogar',e:'🏠'},{n:'Ropa y Calzado',e:'👕'},{n:'Gimnasio',e:'🏋️'},{n:'Electrodomésticos',e:'🔌'},{n:'Comida',e:'🍎'},{n:'Bebida',e:'🥤'},{n:'Accesorios',e:'👜'},{n:'Belleza',e:'💄'},{n:'Electrónica',e:'🎧'},{n:'Juguetes',e:'🧸'},{n:'Papelería',e:'📝'},{n:'Mascotas',e:'🐾'},{n:'Ferretería',e:'🔧'},{n:'Jardinería',e:'🌱'},{n:'Bebés y niños',e:'🍼'},{n:'Deportes',e:'🏀'},{n:'Tecnología',e:'💻'},{n:'Otros',e:'📦'}];
@@ -370,7 +371,7 @@ function inPeriod(iso,p){const t=new Date(iso).getTime(),n=new Date(),sod=new Da
   if(p==='today')return t>=sod;const map={'7':6,'15':14,'30':29};if(map[p]!==undefined)return t>=sod-map[p]*864e5;return true}
 function fdate(iso){const d=new Date(iso),n=new Date();const hm=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
   if(d.toDateString()===n.toDateString())return 'Hoy, '+hm;return d.getDate()+' '+MESES[d.getMonth()]+', '+hm}
-let tt;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('on'),2200)}
+let tt;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('on'),m.length>40?4200:2200)}
 
 /* ---------- tema ---------- */
 const mq=matchMedia('(prefers-color-scheme:dark)');
@@ -606,7 +607,7 @@ const ACT={
     if(!sb){toast('Falta configurar la conexión con la base de datos');return}
     toast('Verificando disponibilidad del ID…');
     const ok=await ensureAuth();
-    if(!ok){toast('No se pudo conectar con el servidor');return}
+    if(!ok){toast('No se pudo conectar: '+authError);return}
     for(let i=0;i<6;i++){
       const id=String(Math.floor(10000000+Math.random()*90000000));
       const {error}=await sb.from('stores').insert({id,name:state.store,currency:state.cur,owner_id:sbUserId});
@@ -662,7 +663,8 @@ const ACT={
       <div class="btnrow" style="margin-top:18px"><button class="btn ghost" data-act="sheetclose">Cerrar</button><button class="btn danger" data-act="undosale" data-id="${s.id}">Devolver al stock</button></div>`)},
   undosale:id=>{const s=state.sales.find(x=>x.id===id);if(!s)return;const p=prod(s.pid);
     if(p){let v=p.variants.find(x=>x.id===s.vid);if(v)v.qty+=s.qty;else p.variants.push({id:uid(),size:s.variant==='Único'?'':s.variant,color:'',qty:s.qty})}
-    state.sales=state.sales.filter(x=>x.id!==id);save();closeSheet();render();toast(p?'Venta anulada y stock restaurado':'Venta anulada')},
+    state.sales=state.sales.filter(x=>x.id!==id);save();closeSheet();render();toast(p?'Venta anulada y stock restaurado':'Venta anulada');
+    pullSale(id)},
   theme:id=>{state.theme=id;save();applyTheme();render()},
   cur:id=>{state.cur=id;save();render();syncStoreMeta()},
   editstore:()=>openSheet(`<h3>Datos de la tienda</h3><p class="muted">El nombre y la foto aparecen en tu pantalla de inicio y en Configuración.</p>
@@ -672,18 +674,18 @@ const ACT={
     <button class="btn full" data-act="savestore">Guardar</button>`),
   savestore:()=>{const n=$('#sn').value.trim();if(!n)return toast('Escribe un nombre');state.store=n;save();closeSheet();render();syncStoreMeta()},
   linkapprove:async id=>{
-    const ok=await ensureAuth();if(!ok){toast('No se pudo conectar');return}
+    const ok=await ensureAuth();if(!ok){toast('No se pudo conectar: '+authError);return}
     const {error}=await sb.from('store_links').update({status:'approved',decided_at:new Date().toISOString()}).eq('id',id);
     if(error){toast('No se pudo aprobar la solicitud');return}
     toast('Dispositivo vinculado a tu tienda');refreshLinks();
   },
   linkreject:async id=>{
-    const ok=await ensureAuth();if(!ok){toast('No se pudo conectar');return}
+    const ok=await ensureAuth();if(!ok){toast('No se pudo conectar: '+authError);return}
     const {error}=await sb.from('store_links').update({status:'rejected',decided_at:new Date().toISOString()}).eq('id',id);
     if(!error){toast('Solicitud rechazada');refreshLinks()}
   },
   linkrevoke:id=>ask('¿Revocar acceso?','Ese dispositivo dejará de ver la información de tu tienda en Wallet.','Revocar',async()=>{
-    const ok=await ensureAuth();if(!ok){toast('No se pudo conectar');return}
+    const ok=await ensureAuth();if(!ok){toast('No se pudo conectar: '+authError);return}
     const {error}=await sb.from('store_links').update({status:'revoked',decided_at:new Date().toISOString()}).eq('id',id);
     if(!error){toast('Acceso revocado');refreshLinks()}
   },true),
@@ -716,12 +718,18 @@ async function syncStoreMeta(){
   const ok=await ensureAuth();if(!ok)return;
   try{await sb.from('stores').update({name:state.store,currency:state.cur}).eq('id',state.storeId)}catch(e){}
 }
+async function pullSale(externalId){
+  if(!sb||!state.storeId)return;
+  const ok=await ensureAuth();if(!ok)return;
+  try{await sb.from('sales').delete().eq('store_id',state.storeId).eq('external_id',externalId)}catch(e){}
+}
 async function pushSale(s){
   if(!sb||!state.storeId)return;
   const ok=await ensureAuth();if(!ok)return;
   try{
     await sb.from('sales').insert({
       store_id:state.storeId,
+      external_id:s.id,
       total:Math.round(s.qty*s.price*100)/100,
       payment_method:'Efectivo',
       items:[{name:s.name,variant:s.variant,qty:s.qty,price:s.price,cost:s.cost}]
