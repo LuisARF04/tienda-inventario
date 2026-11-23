@@ -110,6 +110,15 @@ svg.i{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke
 .plus{width:30px;height:30px;border-radius:10px;background:var(--accent);color:#fff;display:grid;place-items:center}
 .plus svg{width:16px;height:16px;stroke-width:3}
 .pcard.out{opacity:.6}
+#lb{position:absolute;inset:0;z-index:65;display:none;align-items:center;justify-content:center;background:rgba(5,8,20,.92)}
+#lb.on{display:flex}
+#lb img{max-width:92%;max-height:92%;border-radius:20px;object-fit:contain}
+.daysep{font-size:13px;font-weight:800;color:var(--muted);margin:18px 0 8px;text-transform:uppercase;letter-spacing:.04em}
+.lotchip{padding:10px 14px;border-radius:14px;background:var(--tile);font-weight:600;font-size:13px;border:1.5px solid transparent;text-align:left}
+.lotchip.on{border-color:var(--accent);background:var(--accent-soft)}
+.lotchip.off{opacity:.4}
+.seg.sm{padding:3px;margin-top:8px}
+.seg.sm button{padding:7px 4px;font-size:12px}
 .fab{position:absolute;right:24px;bottom:calc(72px + env(safe-area-inset-bottom) + 18px);width:58px;height:58px;border-radius:20px;background:var(--accent);color:#fff;display:none;place-items:center;box-shadow:0 12px 26px rgba(255,107,61,.45);z-index:5}
 .fab.on{display:grid}
 .fab svg{width:26px;height:26px;stroke-width:2.6}
@@ -276,6 +285,7 @@ textarea.inp{min-height:84px;resize:none}
   <div id="ov"></div>
   <div id="sh"><div class="bd" data-act="sheetclose"></div><div id="shp" class="panel"></div></div>
   <div id="onb"></div>
+  <div id="lb" data-act="closelb"></div>
   <div id="crop">
     <div class="cropbar"><button data-act="cropcancel">Cancelar</button><span>Ajusta la foto</span><button data-act="cropok">Listo</button></div>
     <div class="cropstage"><div class="cropbox" id="cropbox"><img id="cropimg" alt=""><div class="cropmask"></div></div></div>
@@ -342,7 +352,9 @@ const P={
  tag:'<path d="M20 12l-8 8-9-9V3h8z"/><circle cx="7.5" cy="7.5" r="1.2"/>',
  alert:'<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.01"/>',
  undo:'<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>',
- layers:'<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>'
+ layers:'<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
+ share:'<circle cx="18" cy="5" r="2.8"/><circle cx="6" cy="12" r="2.8"/><circle cx="18" cy="19" r="2.8"/><path d="M8.5 10.7l7-4.1M8.5 13.3l7 4.1"/>',
+ close:'<path d="M6 6l12 12M18 6L6 18"/>'
 };
 const ic=(n)=>`<svg class="i" viewBox="0 0 24 24">${P[n]||''}</svg>`;
 const $=(s,r=document)=>r.querySelector(s);
@@ -355,11 +367,36 @@ const sgn=n=>(n>0?'+':'')+fmt(n);
 
 const blank=()=>({v:1,onboarded:false,store:'Mi tienda',storeImg:'',storeId:'',theme:'auto',cur:'CUP',products:[],sales:[]});
 const formatId=id=>id?id.slice(0,4)+' '+id.slice(4):'';
-function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&Array.isArray(s.products))return Object.assign(blank(),s)}catch(e){}return blank()}
-let state=load();
-function save(){try{localStorage.setItem(KEY,JSON.stringify(state))}catch(e){toast('No hay espacio. Usa fotos más pequeñas o exporta un respaldo')}}
-const ui={tab:'home',period:'all',speriod:'all',cat:'Todos',sup:'Todas',q:'',search:false};
-let ov=null,draft=null,confirmCb=null;
+
+/* ---------- varias tiendas (cada una con sus datos aparte) ---------- */
+const REG_KEY='inv_stores_v1',ACTIVE_KEY='inv_active_store';
+const storageKeyFor=id=>id==='default'?KEY:KEY+'__'+id;
+function loadRegistry(){try{const r=JSON.parse(localStorage.getItem(REG_KEY));if(Array.isArray(r)&&r.length)return r}catch(e){}return [{id:'default',name:'Mi tienda'}]}
+function saveRegistry(r){try{localStorage.setItem(REG_KEY,JSON.stringify(r))}catch(e){}}
+let registry=loadRegistry();
+let activeId=localStorage.getItem(ACTIVE_KEY)||'default';
+if(!registry.some(r=>r.id===activeId))activeId=registry[0].id;
+
+function load(id){try{const s=JSON.parse(localStorage.getItem(storageKeyFor(id)));if(s&&Array.isArray(s.products))return Object.assign(blank(),s)}catch(e){}return blank()}
+let state=load(activeId);
+migrateLots();
+(()=>{const entry=registry.find(r=>r.id===activeId);if(entry&&state.store)entry.name=state.store;else if(entry)entry.name=entry.name||state.store;saveRegistry(registry)})();
+function save(){try{localStorage.setItem(storageKeyFor(activeId),JSON.stringify(state))}catch(e){toast('No hay espacio. Usa fotos más pequeñas o exporta un respaldo')}}
+function renameActiveStore(n){const entry=registry.find(r=>r.id===activeId);if(entry){entry.name=n;saveRegistry(registry)}}
+function switchToStore(id){
+  if(id===activeId){closeSheet();return}
+  activeId=id;localStorage.setItem(ACTIVE_KEY,id);
+  state=load(id);migrateLots();ui.tab='home';closeSheet();applyTheme();render();
+}
+function createStore(name){
+  const id=uid();registry.push({id,name});saveRegistry(registry);
+  activeId=id;localStorage.setItem(ACTIVE_KEY,id);
+  state=blank();state.store=name;state.onboarded=true;save();
+  ui.tab='home';closeSheet();render();
+}
+const ui={tab:'home',period:'all',speriod:'all',cat:'Todos',sup:'Todas',q:'',search:false,onlyAvail:false,sSearch:false,sq:'',sFrom:'',sTo:''};
+let ov=null,draft=null,confirmCb=null,restockCurr='CUP';
+const round2=n=>Math.round(n*100)/100;
 
 const money=n=>fmt(n)+' '+state.cur;
 const prod=id=>state.products.find(p=>p.id===id);
@@ -367,6 +404,33 @@ const stock=p=>sum(p.variants,v=>v.qty);
 const vlabel=v=>[v.size,v.color].filter(Boolean).join(' · ')||'Único';
 const catE=n=>(CATS.find(c=>c.n===n)||CATS[CATS.length-1]).e;
 const thumb=(p,cls='')=>p&&p.img?`<div class="th ${cls}"><img src="${p.img}" alt=""></div>`:`<div class="th ${cls}"><span>${p?catE(p.cat):'📦'}</span></div>`;
+
+/* ---------- lotes de compra (mismo producto, distintos precios de compra) ---------- */
+function migrateLots(){
+  state.products.forEach(p=>{
+    (p.variants||[]).forEach(v=>{
+      if(!Array.isArray(v.lots)||!v.lots.length){v.lots=[{id:uid(),cost:p.cost||0,qty:v.qty||0}];return}
+      const lotSum=sum(v.lots,l=>l.qty);
+      if(lotSum!==v.qty){
+        const diff=v.qty-lotSum;
+        if(diff>0)v.lots.push({id:uid(),cost:p.cost||0,qty:diff});
+        else{let rem=-diff;for(let i=v.lots.length-1;i>=0&&rem>0;i--){const take=Math.min(v.lots[i].qty,rem);v.lots[i].qty-=take;rem-=take}v.lots=v.lots.filter(l=>l.qty>0);if(!v.lots.length)v.lots=[{id:uid(),cost:p.cost||0,qty:0}]}
+      }
+    });
+  });
+}
+function addLot(v,qty,cost){
+  const ex=v.lots.find(l=>Math.abs(l.cost-cost)<0.005);
+  if(ex)ex.qty+=qty;else v.lots.push({id:uid(),cost,qty});
+  v.qty=sum(v.lots,l=>l.qty);
+}
+function defaultLot(v){if(!v)return null;return v.lots.find(l=>l.qty>0)||v.lots[0]||null}
+async function fetchRate(){
+  try{
+    const r=await fetch(`https://raw.githubusercontent.com/LuisARF04/mis-finanzas/main/rates.json?t=${Date.now()}`,{cache:'no-store'});
+    if(!r.ok)throw 0;const j=await r.json();if(!j.usd)throw 0;return j.usd;
+  }catch(e){return null}
+}
 function inPeriod(iso,p){const t=new Date(iso).getTime(),n=new Date(),sod=new Date(n.getFullYear(),n.getMonth(),n.getDate()).getTime();
   if(p==='today')return t>=sod;const map={'7':6,'15':14,'30':29};if(map[p]!==undefined)return t>=sod-map[p]*864e5;return true}
 function fdate(iso){const d=new Date(iso),n=new Date();const hm=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
@@ -417,7 +481,7 @@ function homeHTML(){
   const stockUnits=sum(state.products,stock),stockCost=sum(state.products,p=>p.cost*stock(p)),stockVal=sum(state.products,p=>p.price*stock(p));
   const invested=costAll+stockCost,pct=invested?Math.min(100,revAll/invested*100):0;
   const recent=state.sales.slice(0,3);
-  return `<div class="top"><div class="title">Tienda: ${esc(state.store)}</div></div>
+  return `<div class="top"><button class="circ" data-act="switchstore" aria-label="Cambiar de tienda">${ic('store')}</button><div class="title" style="flex:1;text-align:right">Tienda: ${esc(state.store)}</div></div>
     ${periodChips(ui.period,'period')}
     <div class="hero">
       <div class="lab">Dinero recaudado</div>
@@ -459,10 +523,14 @@ function saleRow(s){
 function filtered(){
   const q=ui.q.trim().toLowerCase();
   return state.products.filter(p=>{
+    if(ui.onlyAvail&&stock(p)<1)return false;
     if(ui.cat==='Poco stock'){if(stock(p)>2)return false}else if(ui.cat!=='Todos'&&p.cat!==ui.cat)return false;
     if(ui.sup!=='Todas'&&p.supplier!==ui.sup)return false;
     if(q){const hay=[p.name,p.supplier,p.cat,...p.variants.flatMap(v=>[v.size,v.color])].join(' ').toLowerCase();if(!hay.includes(q))return false}
-    return true}).sort((a,b)=>a.name.localeCompare(b.name,'es'));
+    return true}).sort((a,b)=>{
+      const sa=stock(a)>0?0:1,sb=stock(b)>0?0:1;
+      if(sa!==sb)return sa-sb;
+      return a.name.localeCompare(b.name,'es')});
 }
 function gridHTML(){
   const L=filtered();
@@ -481,22 +549,43 @@ function invHTML(){
     <button class="circ" data-act="search" aria-label="Buscar">${ic('search')}</button></div>
     ${ui.search?`<div class="search">${ic('search')}<input id="q" placeholder="Nombre, tienda, talla, color…" value="${esc(ui.q)}" autocomplete="off"></div>`:''}
     <div class="selectwrap"><select id="catsel">${cats.map(c=>`<option value="${esc(c)}" ${ui.cat===c?'selected':''}>${c==='Todos'?'Todas las categorías':esc(c)}</option>`).join('')}</select>${ic('chev')}</div>
+    <div class="chips"><button class="chip ${ui.onlyAvail?'on':''}" data-act="onlyavail">${ui.onlyAvail?'✓ ':''}Solo disponibles</button></div>
     ${sups.length>1?`<div class="chips">${['Todas',...sups].map(c=>`<button class="chip ${ui.sup===c?'on':''}" data-act="sup" data-id="${esc(c)}">${c==='Todas'?'Todas las tiendas':esc(c)}</button>`).join('')}</div>`:''}
     <div id="grid">${gridHTML()}</div>`;
 }
-function salesHTML(){
-  const S=state.sales.filter(s=>inPeriod(s.date,ui.speriod));
+function salesFilteredList(){
+  let S=state.sales.filter(s=>inPeriod(s.date,ui.speriod));
+  if(ui.sFrom){const f=new Date(ui.sFrom).getTime();S=S.filter(s=>new Date(s.date).getTime()>=f)}
+  if(ui.sTo){const t=new Date(ui.sTo).getTime()+864e5-1;S=S.filter(s=>new Date(s.date).getTime()<=t)}
+  if(ui.sq.trim()){const q=ui.sq.trim().toLowerCase();S=S.filter(s=>(s.name+' '+s.variant).toLowerCase().includes(q))}
+  return S;
+}
+function dayLabel(d){const n=new Date();if(d.toDateString()===n.toDateString())return'Hoy';
+  const y=new Date(n);y.setDate(y.getDate()-1);if(d.toDateString()===y.toDateString())return'Ayer';
+  return d.getDate()+' de '+MESES[d.getMonth()]+(d.getFullYear()!==n.getFullYear()?' de '+d.getFullYear():'')}
+function salesListHTML(){
+  const S=salesFilteredList();
   const rev=sum(S,s=>s.qty*s.price),prof=rev-sum(S,s=>s.qty*s.cost);
-  return `<div class="top"><div><div class="hello">${state.sales.length} registradas</div><div class="title">Ventas</div></div></div>
+  const groups=[];let lastKey='';
+  S.forEach(s=>{const d=new Date(s.date),key=d.toDateString();if(key!==lastKey){groups.push({key,date:d,items:[]});lastKey=key}groups[groups.length-1].items.push(s)});
+  return `<div class="sumbar"><div><span>Ventas</span><b>${S.length}</b></div><div><span>Ingresos</span><b>${fmt(rev)}</b></div><div><span>Ganancia</span><b style="color:${prof>=0?'var(--good)':'var(--bad)'}">${sgn(prof)}</b></div></div>
+    ${groups.length?groups.map(g=>`<div class="daysep">${dayLabel(g.date)}</div>${g.items.map(saleRow).join('')}`).join(''):`<div class="empty"><div class="em">🧾</div><b>Sin ventas con estos filtros</b>Prueba otro periodo, fechas o búsqueda.</div>`}`;
+}
+function salesHTML(){
+  return `<div class="top"><div><div class="hello">${state.sales.length} registradas</div><div class="title">Ventas</div></div>
+    <button class="circ" data-act="ssearch" aria-label="Buscar y filtrar por fecha">${ic('search')}</button></div>
     ${periodChips(ui.speriod,'speriod')}
-    <div class="sumbar"><div><span>Ventas</span><b>${S.length}</b></div><div><span>Ingresos</span><b>${fmt(rev)}</b></div><div><span>Ganancia</span><b style="color:${prof>=0?'var(--good)':'var(--bad)'}">${sgn(prof)}</b></div></div>
-    ${S.length?S.map(saleRow).join(''):`<div class="empty"><div class="em">🧾</div><b>Sin ventas en este periodo</b>Las ventas que registres aparecerán aquí.</div>`}`;
+    ${ui.sSearch?`<div class="search" style="margin-bottom:14px">${ic('search')}<input id="sq" placeholder="Buscar por producto…" value="${esc(ui.sq)}" autocomplete="off"></div>
+      <div class="two" style="margin-bottom:6px"><div class="field" style="margin:0"><label>Desde</label><input class="inp" type="date" id="sdfrom" value="${ui.sFrom}"></div><div class="field" style="margin:0"><label>Hasta</label><input class="inp" type="date" id="sdto" value="${ui.sTo}"></div></div>`:''}
+    <div id="saleslist">${salesListHTML()}</div>`;
 }
 function moreHTML(){
   const seg=(items,cur,act)=>`<div class="seg">${items.map(([k,l])=>`<button class="${cur===k?'on':''}" data-act="${act}" data-id="${k}">${l}</button>`).join('')}</div>`;
   return `<div class="profile"><div class="avatar">${state.storeImg?`<img src="${state.storeImg}" alt="">`:esc((state.store.trim()[0]||'T').toUpperCase())}</div><h2>${esc(state.store)}</h2>
     <p class="muted">${state.products.length} productos y ${state.sales.length} ventas</p></div>
     <button class="mrow" data-act="editstore">${ic('store')}<span>Datos de la tienda</span>${ic('chev')}</button>
+    <button class="mrow" data-act="switchstore">${ic('store')}<span>Cambiar o crear tienda</span>${ic('chev')}</button>
+    <button class="mrow" data-act="sharelist">${ic('share')}<span>Compartir lista de disponibles</span>${ic('chev')}</button>
     <div class="opt"><div>${ic('tag')}<span>ID de tienda</span></div>
       ${state.storeId?`<div class="idbox"><b>${formatId(state.storeId)}</b><button class="lnk" data-act="copyid">Copiar</button></div>
         <button class="lnk" style="margin-top:10px;color:var(--muted)" data-act="regenid">Generar otro ID</button>`
@@ -524,32 +613,40 @@ function renderOv(){
 }
 function detailHTML(){
   const p=prod(ov.id);if(!p){closeOv();return ''}
-  const v=p.variants.find(x=>x.id===ov.vid),st=stock(p),can=v&&v.qty>0;
+  let v=p.variants.find(x=>x.id===ov.vid);if(!v){v=p.variants.find(x=>x.qty>0)||p.variants[0];ov.vid=v&&v.id}
+  if(v&&(!Array.isArray(v.lots)||!v.lots.length))v.lots=[{id:uid(),cost:p.cost||0,qty:v.qty||0}];
+  let lot=v&&v.lots.find(l=>l.id===ov.lotId);if(!lot){lot=defaultLot(v);ov.lotId=lot&&lot.id}
+  const st=stock(p),can=!!(lot&&lot.qty>0);
   const S=state.sales.filter(s=>s.pid===p.id),rev=sum(S,s=>s.qty*s.price),prof=rev-sum(S,s=>s.qty*s.cost);
-  const price=num(ov.price),unitProf=price-p.cost;
+  const price=num(ov.price);
+  const availLots=v?v.lots.filter(l=>l.qty>0):[];
   return `<div class="screen"><div class="sheet">
     <div class="dhero"><div class="nav"><button class="circ glass" data-act="close" aria-label="Volver">${ic('back')}</button><button class="circ glass" data-act="edit" aria-label="Editar">${ic('edit')}</button></div>
-      <div class="pic th">${p.img?`<img src="${p.img}" alt="">`:`<span>${catE(p.cat)}</span>`}</div></div>
+      <div class="pic th" ${p.img?'data-act="zoomphoto"':''}>${p.img?`<img src="${p.img}" alt="">`:`<span>${catE(p.cat)}</span>`}</div></div>
     <div class="dname"><div><h2>${esc(p.name)}</h2><div class="muted" style="font-size:13px;margin-top:3px;font-weight:600">${st?st+' en stock':'Agotado'}${p.supplier?', '+esc(p.supplier):''}</div></div>
-      <div class="stepper"><button data-act="qminus" ${ov.qty<=1?'disabled':''}>${ic('minus')}</button><b>${ov.qty}</b><button data-act="qplus" ${!can||ov.qty>=v.qty?'disabled':''}>${ic('plus')}</button></div></div>
+      <div class="stepper"><button data-act="qminus" ${ov.qty<=1?'disabled':''}>${ic('minus')}</button><b>${ov.qty}</b><button data-act="qplus" ${!can||ov.qty>=lot.qty?'disabled':''}>${ic('plus')}</button></div></div>
     <div class="h4">Talla, tamaño o color</div>
     <div class="vchips">${p.variants.map(x=>`<button class="vchip ${x.id===ov.vid?'on':''} ${x.qty<1?'off':''}" ${x.qty<1?'disabled':''} data-act="pickvar" data-id="${x.id}">${esc(vlabel(x))}<i>${x.qty}</i></button>`).join('')}</div>
+    ${availLots.length>1?`<div class="h4">Lote de compra a vender</div>
+    <div class="vchips">${availLots.map(l=>`<button class="lotchip ${l.id===ov.lotId?'on':''}" data-act="picklot" data-id="${l.id}">Compra: ${fmt(l.cost)} ${state.cur}<i style="display:block;color:var(--muted);font-weight:600">${l.qty} disp.</i></button>`).join('')}</div>`:''}
     <div class="h4">Precio de venta por unidad</div>
     <input class="inp" data-f="price" inputmode="decimal" value="${esc(ov.price)}" autocomplete="off">
     <div class="mg" id="sellmg" style="margin:10px 0 0"></div>
     <div class="h4">Resumen del producto</div>
-    <div class="fin"><div><span>Compra</span><b>${fmt(p.cost)}</b></div><div><span>Vendidos</span><b>${sum(S,s=>s.qty)}</b></div><div><span>Ganancia total</span><b style="color:${prof>=0?'var(--good)':'var(--bad)'}">${sgn(prof)}</b></div></div>
+    <div class="fin"><div><span>Compra${availLots.length>1?' (lote)':''}</span><b>${fmt(lot?lot.cost:p.cost)}</b></div><div><span>Vendidos</span><b>${sum(S,s=>s.qty)}</b></div><div><span>Ganancia total</span><b style="color:${prof>=0?'var(--good)':'var(--bad)'}">${sgn(prof)}</b></div></div>
     ${p.desc?`<div class="h4">Notas</div><p class="desc">${esc(p.desc)}</p>`:''}
     <button class="ghostbtn" data-act="restock">${ic('plus')}Reabastecer stock</button>
   </div>
   <div class="bbar"><div><small>Total a cobrar</small><b id="tot">${fmt(price*ov.qty)}<em>${state.cur}</em></b></div><button class="pill" data-act="sell" ${can?'':'disabled'}>Vender</button></div></div>`;
 }
 function sellDom(){
-  const p=prod(ov.id);if(!p)return;const price=num(ov.price),u=price-p.cost;
+  const p=prod(ov.id);if(!p)return;
+  const v=p.variants.find(x=>x.id===ov.vid),lot=v&&v.lots&&v.lots.find(l=>l.id===ov.lotId);
+  const price=num(ov.price),u=price-(lot?lot.cost:p.cost);
   const t=$('#tot');if(t)t.innerHTML=fmt(price*ov.qty)+`<em>${state.cur}</em>`;
   const m=$('#sellmg');if(m)m.innerHTML=`Ganancia de esta venta: <b class="${u>=0?'g':'r'}">${sgn(u*ov.qty)} ${state.cur}</b>`;
 }
-function blankDraft(){return {name:'',supplier:'',cat:'Ropa y Calzado',cost:'',price:'',desc:'',img:'',variants:[{id:uid(),size:'',color:'',qty:''}]}}
+function blankDraft(){return {name:'',supplier:'',cat:'Ropa y Calzado',cost:'',costCurr:state.cur,price:'',desc:'',img:'',variants:[{id:uid(),size:'',color:'',qty:''}]}}
 function formHTML(){
   const d=draft,sups=[...new Set(state.products.map(p=>p.supplier).filter(Boolean))];
   return `<div class="screen"><div class="navhead"><button class="circ ghostw" data-act="formback" aria-label="Volver">${ic('back')}</button><h2>${d.id?'Editar producto':'Nuevo producto'}</h2>
@@ -560,8 +657,9 @@ function formHTML(){
       <div class="field"><label>Nombre del producto</label><input class="inp" data-f="name" value="${esc(d.name)}" placeholder="Ej. Camiseta oversize" autocomplete="off"></div>
       <div class="field"><label>Tienda donde lo compraste</label><input class="inp" data-f="supplier" list="suplist" value="${esc(d.supplier)}" placeholder="Ej. Mercado Central" autocomplete="off"><datalist id="suplist">${sups.map(s=>`<option value="${esc(s)}">`).join('')}</datalist></div>
       <div class="field"><label>Categoría</label><div class="selectwrap"><select data-f="cat">${CATS.map(c=>`<option value="${c.n}" ${d.cat===c.n?'selected':''}>${c.e} ${c.n}</option>`).join('')}</select>${ic('chev')}</div></div>
-      <div class="two"><div class="field"><label>Precio de compra</label><input class="inp" data-f="cost" inputmode="decimal" value="${esc(d.cost)}" placeholder="0" autocomplete="off"></div>
-        <div class="field"><label>Precio de venta</label><input class="inp" data-f="price" inputmode="decimal" value="${esc(d.price)}" placeholder="0" autocomplete="off"></div></div>
+      <div class="two"><div class="field"><label>Precio de compra</label><input class="inp" data-f="cost" inputmode="decimal" value="${esc(d.cost)}" placeholder="0" autocomplete="off">
+          <div class="seg sm">${CURS.map(c=>`<button data-act="costcurr" data-id="${c}" class="${(d.costCurr||state.cur)===c?'on':''}">${c}</button>`).join('')}</div></div>
+        <div class="field"><label>Precio de venta (${state.cur})</label><input class="inp" data-f="price" inputmode="decimal" value="${esc(d.price)}" placeholder="0" autocomplete="off"></div></div>
       <div class="mg" id="mg"></div>
       <div class="field" style="margin-bottom:8px"><label>Variantes (talla o tamaño, color y cantidad)</label></div>
       ${d.variants.map((v,i)=>`<div class="vrow"><input class="inp" data-f="v" data-i="${i}" data-k="size" value="${esc(v.size)}" placeholder="Talla / tamaño"><input class="inp" data-f="v" data-i="${i}" data-k="color" value="${esc(v.color)}" placeholder="Color"><input class="inp" data-f="v" data-i="${i}" data-k="qty" inputmode="numeric" value="${esc(v.qty)}" placeholder="Cant."><button data-act="delvar" data-id="${i}" aria-label="Quitar">${ic('trash')}</button></div>`).join('')}
@@ -590,10 +688,11 @@ const ACT={
   cat:id=>{ui.cat=id;render()},
   sup:id=>{ui.sup=id;render()},
   search:()=>{ui.search=!ui.search;if(!ui.search)ui.q='';render();if(ui.search)$('#q').focus()},
+  ssearch:()=>{ui.sSearch=!ui.sSearch;if(!ui.sSearch){ui.sq='';ui.sFrom='';ui.sTo=''}render();if(ui.sSearch){const el=$('#sq');if(el)el.focus()}},
   open:id=>{const p=prod(id);if(!p)return;const v=p.variants.find(v=>v.qty>0)||p.variants[0];ov={type:'detail',id,vid:v&&v.id,qty:1,price:String(p.price)};openOv()},
   close:()=>closeOv(),
   new:()=>{draft=blankDraft();ov={type:'form'};openOv();margin()},
-  edit:()=>{const p=prod(ov.id);draft=JSON.parse(JSON.stringify(p));draft.cost=String(p.cost);draft.price=String(p.price);draft.variants.forEach(v=>v.qty=String(v.qty));ov={type:'form',id:p.id};renderOv();margin()},
+  edit:()=>{const p=prod(ov.id);draft=JSON.parse(JSON.stringify(p));draft.cost=String(p.cost);draft.costCurr=state.cur;draft.price=String(p.price);draft.variants.forEach(v=>v.qty=String(v.qty));ov={type:'form',id:p.id};renderOv();margin()},
   formback:()=>{if(ov.id){const p=prod(ov.id);draft=null;ov={type:'detail',id:p.id,vid:(p.variants.find(v=>v.qty>0)||p.variants[0]).id,qty:1,price:String(p.price)};renderOv()}else closeOv()},
   addvar:()=>{draft.variants.push({id:uid(),size:'',color:'',qty:''});renderOv();margin();const r=document.querySelectorAll('.vrow');r[r.length-1].querySelector('input').focus()},
   delvar:id=>{if(draft.variants.length>1){draft.variants.splice(+id,1);renderOv();margin()}else toast('Debe haber al menos una variante')},
@@ -621,58 +720,132 @@ const ACT={
     if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(state.storeId).then(()=>toast('ID copiado')).catch(()=>toast('No se pudo copiar'));
     else toast('No se pudo copiar');
   },
-  save:()=>{
+  save:async()=>{
     const d=draft;if(!d.name.trim())return toast('Escribe el nombre del producto');
     if(num(d.price)<=0)return toast('Escribe el precio de venta');
-    const vs=d.variants.map(v=>({id:v.id,size:v.size.trim(),color:v.color.trim(),qty:Math.max(0,parseInt(v.qty)||0)}));
-    const p={id:d.id||uid(),name:d.name.trim(),supplier:d.supplier.trim(),cat:d.cat,cost:num(d.cost),price:num(d.price),desc:d.desc.trim(),img:d.img||'',variants:vs,created:d.created||Date.now()};
+    let cost=num(d.cost);
+    if((d.costCurr||state.cur)!==state.cur){
+      toast('Convirtiendo precio de compra…');
+      const rate=await fetchRate();
+      if(!rate){toast('No se pudo obtener la tasa de cambio para convertir. Verifica tu conexión e intenta de nuevo.');return}
+      cost=state.cur==='CUP'?round2(cost*rate):round2(cost/rate);
+    }
+    const vs=d.variants.map(v=>{
+      const qty=Math.max(0,parseInt(v.qty)||0);
+      let lots=Array.isArray(v.lots)?v.lots.map(l=>({id:l.id||uid(),cost:l.cost,qty:l.qty})):[];
+      const lotSum=sum(lots,l=>l.qty);
+      if(qty!==lotSum){
+        const diff=qty-lotSum;
+        if(diff>0)lots.push({id:uid(),cost,qty:diff});
+        else{let rem=-diff;for(let i=lots.length-1;i>=0&&rem>0;i--){const take=Math.min(lots[i].qty,rem);lots[i].qty-=take;rem-=take}lots=lots.filter(l=>l.qty>0)}
+      }
+      if(!lots.length)lots=[{id:uid(),cost,qty:0}];
+      return {id:v.id,size:v.size.trim(),color:v.color.trim(),qty,lots};
+    });
+    const p={id:d.id||uid(),name:d.name.trim(),supplier:d.supplier.trim(),cat:d.cat,cost,price:num(d.price),desc:d.desc.trim(),img:d.img||'',variants:vs,created:d.created||Date.now()};
     const i=state.products.findIndex(x=>x.id===p.id);if(i>-1)state.products[i]=p;else state.products.unshift(p);
     save();
-    if(d.id){draft=null;ov={type:'detail',id:p.id,vid:(vs.find(v=>v.qty>0)||vs[0]).id,qty:1,price:String(p.price)};renderOv();render()}else closeOv();
+    if(d.id){draft=null;ov={type:'detail',id:p.id,vid:(vs.find(v=>v.qty>0)||vs[0]).id,qty:1,lotId:null,price:String(p.price)};renderOv();render()}else closeOv();
     toast(d.id?'Cambios guardados':'Producto agregado');
   },
+  costcurr:id=>{draft.costCurr=id;renderOv();margin()},
   delprod:()=>ask('¿Eliminar producto?','Se quitará del inventario. Tus ventas anteriores se conservan en el historial.','Eliminar',()=>{state.products=state.products.filter(p=>p.id!==ov.id);save();closeOv();toast('Producto eliminado')},true),
-  pickvar:id=>{ov.vid=id;ov.qty=1;renderOv()},
+  pickvar:id=>{ov.vid=id;ov.qty=1;ov.lotId=null;renderOv()},
+  picklot:id=>{ov.lotId=id;ov.qty=1;renderOv()},
+  onlyavail:()=>{ui.onlyAvail=!ui.onlyAvail;render()},
+  zoomphoto:()=>{const p=prod(ov.id);if(!p||!p.img)return;$('#lb').innerHTML=`<img src="${p.img}" alt="">`;$('#lb').classList.add('on')},
+  closelb:()=>{$('#lb').classList.remove('on');$('#lb').innerHTML=''},
   qminus:()=>{if(ov.qty>1){ov.qty--;renderOv();sellDom()}},
-  qplus:()=>{const p=prod(ov.id),v=p.variants.find(x=>x.id===ov.vid);if(v&&ov.qty<v.qty){ov.qty++;renderOv();sellDom()}},
+  qplus:()=>{const p=prod(ov.id),v=p.variants.find(x=>x.id===ov.vid),lot=v&&v.lots.find(l=>l.id===ov.lotId);if(lot&&ov.qty<lot.qty){ov.qty++;renderOv();sellDom()}},
   sell:()=>{
-    const p=prod(ov.id),v=p.variants.find(x=>x.id===ov.vid);
-    if(!v||ov.qty<1||ov.qty>v.qty)return toast('No hay suficiente stock');
+    const p=prod(ov.id),v=p.variants.find(x=>x.id===ov.vid),lot=v&&v.lots.find(l=>l.id===ov.lotId);
+    if(!v||!lot||ov.qty<1||ov.qty>lot.qty)return toast('No hay suficiente stock en ese lote');
     const price=num(ov.price);if(price<=0)return toast('Escribe el precio de venta');
-    v.qty-=ov.qty;
-    const sale={id:uid(),pid:p.id,vid:v.id,name:p.name,variant:vlabel(v),qty:ov.qty,cost:p.cost,price,date:new Date().toISOString()};
+    lot.qty-=ov.qty;v.qty=sum(v.lots,l=>l.qty);
+    const sale={id:uid(),pid:p.id,vid:v.id,lotId:lot.id,name:p.name,variant:vlabel(v),qty:ov.qty,cost:lot.cost,price,date:new Date().toISOString()};
     state.sales.unshift(sale);
     save();const sold=ov.qty,nv=p.variants.find(x=>x.qty>0);
-    ov.vid=(nv||v).id;ov.qty=1;renderOv();sellDom();toast(`Venta registrada: ${fmt(price*sold)} ${state.cur}`);
+    ov.vid=(nv||v).id;ov.lotId=null;ov.qty=1;renderOv();sellDom();toast(`Venta registrada: ${fmt(price*sold)} ${state.cur}`);
     pushSale(sale);
   },
-  restock:()=>{const p=prod(ov.id);
-    openSheet(`<h3>Reabastecer</h3><p class="muted">Suma unidades al stock de ${esc(p.name)}.</p>
+  restock:()=>{const p=prod(ov.id);restockCurr=state.cur;
+    openSheet(`<h3>Reabastecer</h3><p class="muted">Suma unidades al stock de ${esc(p.name)}. Si el precio de compra es distinto al de antes, se guarda como un lote nuevo (podrás elegir cuál vender).</p>
       <div class="field"><label>Variante</label><select class="inp" id="rs-v">${p.variants.map(v=>`<option value="${v.id}" ${v.id===ov.vid?'selected':''}>${esc(vlabel(v))} (hay ${v.qty})</option>`).join('')}</select></div>
       <div class="field"><label>Cantidad que llegó</label><input class="inp" id="rs-q" inputmode="numeric" placeholder="0"></div>
-      <div class="field"><label>Nuevo precio de compra (opcional)</label><input class="inp" id="rs-c" inputmode="decimal" placeholder="${p.cost}"></div>
+      <div class="field"><label>Precio de compra de este lote</label><input class="inp" id="rs-c" inputmode="decimal" placeholder="${p.cost}">
+        <div class="seg sm">${CURS.map(c=>`<button data-act="rscurr" data-id="${c}" class="${restockCurr===c?'on':''}">${c}</button>`).join('')}</div></div>
       <button class="btn full" data-act="dorestock">Agregar al inventario</button>`)},
-  dorestock:()=>{const p=prod(ov.id),v=p.variants.find(x=>x.id===$('#rs-v').value),q=parseInt($('#rs-q').value)||0;
-    if(q<1)return toast('Escribe la cantidad');v.qty+=q;const c=num($('#rs-c').value);if(c>0)p.cost=c;
-    ov.vid=v.id;save();closeSheet();renderOv();sellDom();toast('Stock actualizado')},
+  rscurr:id=>{restockCurr=id;ACT.restock()},
+  dorestock:async()=>{const p=prod(ov.id),v=p.variants.find(x=>x.id===$('#rs-v').value),q=parseInt($('#rs-q').value)||0;
+    if(q<1)return toast('Escribe la cantidad');
+    let c=num($('#rs-c').value)||p.cost||0;
+    if(restockCurr!==state.cur){
+      toast('Convirtiendo precio de compra…');
+      const rate=await fetchRate();
+      if(!rate){toast('No se pudo obtener la tasa de cambio. Verifica tu conexión e intenta de nuevo.');return}
+      c=state.cur==='CUP'?round2(c*rate):round2(c/rate);
+    }
+    addLot(v,q,c);p.cost=c;
+    ov.vid=v.id;ov.lotId=null;save();closeSheet();renderOv();sellDom();toast('Stock actualizado')},
   opensale:id=>{const s=state.sales.find(x=>x.id===id);if(!s)return;const pr=s.qty*(s.price-s.cost);
     openSheet(`<h3>${esc(s.name)}</h3><p class="muted">${esc(s.variant)}, ${fdate(s.date)}</p>
-      <div class="kv"><span>Cantidad</span><b>${s.qty}</b></div><div class="kv"><span>Precio por unidad</span><b>${money(s.price)}</b></div>
-      <div class="kv"><span>Costo por unidad</span><b>${money(s.cost)}</b></div><div class="kv"><span>Total cobrado</span><b>${money(s.qty*s.price)}</b></div>
-      <div class="kv"><span>Ganancia</span><b style="color:${pr>=0?'var(--good)':'var(--bad)'}">${sgn(pr)} ${state.cur}</b></div>
-      <div class="btnrow" style="margin-top:18px"><button class="btn ghost" data-act="sheetclose">Cerrar</button><button class="btn danger" data-act="undosale" data-id="${s.id}">Devolver al stock</button></div>`)},
+      <div class="field"><label>Cantidad</label><input class="inp" id="es-q" inputmode="numeric" value="${s.qty}"></div>
+      <div class="field"><label>Precio por unidad (${state.cur})</label><input class="inp" id="es-p" inputmode="decimal" value="${s.price}"></div>
+      <div class="field"><label>Costo por unidad (${state.cur})</label><input class="inp" id="es-c" inputmode="decimal" value="${s.cost}"></div>
+      <div class="kv"><span>Total cobrado</span><b id="es-tot">${money(s.qty*s.price)}</b></div>
+      <div class="kv"><span>Ganancia</span><b id="es-prof" style="color:${pr>=0?'var(--good)':'var(--bad)'}">${sgn(pr)} ${state.cur}</b></div>
+      <div class="btnrow" style="margin-top:18px"><button class="btn ghost" data-act="sheetclose">Cerrar</button><button class="btn" data-act="savesale" data-id="${s.id}">Guardar cambios</button></div>
+      <button class="btn danger full" style="margin-top:10px" data-act="undosale" data-id="${s.id}">Devolver al stock</button>`)},
+  savesale:id=>{const s=state.sales.find(x=>x.id===id);if(!s)return;
+    const q=Math.max(1,parseInt($('#es-q').value)||1),pr=num($('#es-p').value),c=num($('#es-c').value);
+    if(pr<=0)return toast('Escribe el precio por unidad');
+    s.qty=q;s.price=pr;s.cost=c;save();closeSheet();render();toast('Venta actualizada. El stock no cambia: usa "Devolver al stock" si también necesitas ajustarlo.')},
   undosale:id=>{const s=state.sales.find(x=>x.id===id);if(!s)return;const p=prod(s.pid);
-    if(p){let v=p.variants.find(x=>x.id===s.vid);if(v)v.qty+=s.qty;else p.variants.push({id:uid(),size:s.variant==='Único'?'':s.variant,color:'',qty:s.qty})}
+    if(p){let v=p.variants.find(x=>x.id===s.vid);
+      if(v){if(!Array.isArray(v.lots))v.lots=[];let lot=v.lots.find(l=>l.id===s.lotId);
+        if(!lot){lot={id:s.lotId||uid(),cost:s.cost,qty:0};v.lots.push(lot)}
+        lot.qty+=s.qty;v.qty=sum(v.lots,l=>l.qty);
+      }else p.variants.push({id:uid(),size:s.variant==='Único'?'':s.variant,color:'',qty:s.qty,lots:[{id:uid(),cost:s.cost,qty:s.qty}]})}
     state.sales=state.sales.filter(x=>x.id!==id);save();closeSheet();render();toast(p?'Venta anulada y stock restaurado':'Venta anulada');
     pullSale(id)},
   theme:id=>{state.theme=id;save();applyTheme();render()},
-  cur:id=>{state.cur=id;save();render();syncStoreMeta()},
+  cur:async id=>{
+    if(id===state.cur)return;
+    toast('Obteniendo la tasa de cambio para convertir…');
+    const rate=await fetchRate();
+    if(!rate){toast('No se pudo obtener la tasa de cambio (revisa tu conexión y que Wallet tenga la tasa publicada). No se cambió la moneda.');render();return}
+    const factor=(state.cur==='CUP'&&id==='USD')?(1/rate):(state.cur==='USD'&&id==='CUP')?rate:1;
+    if(factor!==1){
+      state.products.forEach(p=>{
+        p.cost=round2(p.cost*factor);p.price=round2(p.price*factor);
+        (p.variants||[]).forEach(v=>(v.lots||[]).forEach(l=>l.cost=round2(l.cost*factor)));
+      });
+      state.sales.forEach(s=>{s.price=round2(s.price*factor);s.cost=round2(s.cost*factor)});
+    }
+    state.cur=id;save();render();syncStoreMeta();toast('Moneda cambiada a '+id+' (valores convertidos con tasa 1 USD = '+fmt(rate)+' CUP)');
+  },
   editstore:()=>openSheet(`<h3>Datos de la tienda</h3><p class="muted">El nombre y la foto aparecen en tu pantalla de inicio y en Configuración.</p>
     <div class="photorow"><button class="photo" data-act="storephoto">${state.storeImg?`<img src="${state.storeImg}" alt="">`:`<div>${ic('camera')}<br>Foto</div>`}</button>
       <div><p>Agrega una foto para identificar tu tienda.</p>${state.storeImg?'<button class="lnk" data-act="rmstorephoto">Quitar foto</button>':''}</div></div>
     <div class="field"><label>Nombre de tu tienda</label><input class="inp" id="sn" value="${esc(state.store)}" autocomplete="off"></div>
     <button class="btn full" data-act="savestore">Guardar</button>`),
-  savestore:()=>{const n=$('#sn').value.trim();if(!n)return toast('Escribe un nombre');state.store=n;save();closeSheet();render();syncStoreMeta()},
+  savestore:()=>{const n=$('#sn').value.trim();if(!n)return toast('Escribe un nombre');state.store=n;save();renameActiveStore(n);closeSheet();render();syncStoreMeta()},
+  switchstore:()=>{
+    openSheet(`<h3>Tus tiendas</h3><p class="muted">Cambia entre tus tiendas o crea una nueva. Cada tienda guarda sus productos y ventas por separado en este teléfono, con su propio ID para vincular a Wallet.</p>
+      ${registry.map(r=>`<button class="mrow" data-act="gostore" data-id="${r.id}">${ic('store')}<span>${esc(r.name)}</span>${r.id===activeId?ic('chev'):''}</button>`).join('')}
+      <div class="field" style="margin-top:16px"><label>Nombre de la nueva tienda</label><input class="inp" id="newstorename" placeholder="Ej. Tienda 2" autocomplete="off"></div>
+      <button class="btn full" data-act="donewstore">Crear nueva tienda</button>`)},
+  gostore:id=>switchToStore(id),
+  donewstore:()=>{const n=($('#newstorename')?.value||'').trim();if(!n)return toast('Escribe un nombre');createStore(n)},
+  sharelist:async()=>{
+    const avail=state.products.filter(p=>stock(p)>0);
+    if(!avail.length)return toast('No hay productos disponibles para compartir');
+    let text=`*${state.store}* — productos disponibles\n\n`;
+    avail.forEach(p=>{text+=`• ${p.name} — ${stock(p)} disp. — ${fmt(p.price)} ${state.cur}\n`});
+    text+=`\nActualizado: ${new Date().toLocaleDateString('es')}`;
+    try{if(navigator.share){await navigator.share({text,title:state.store});return}}catch(e){}
+    try{window.open('https://wa.me/?text='+encodeURIComponent(text),'_blank')}catch(e){location.href='https://wa.me/?text='+encodeURIComponent(text)}
+  },
   linkapprove:async id=>{
     const ok=await ensureAuth();if(!ok){toast('No se pudo conectar: '+authError);return}
     const {error}=await sb.from('store_links').update({status:'approved',decided_at:new Date().toISOString()}).eq('id',id);
@@ -691,17 +864,26 @@ const ACT={
   },true),
   export:()=>{const b=new Blob([JSON.stringify(state)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='inventario-respaldo.json';document.body.appendChild(a);a.click();a.remove();toast('Respaldo exportado')},
   import:()=>$('#imp').click(),
-  demo:()=>ask('Cargar datos de ejemplo','Esto reemplaza lo que tienes ahora por productos y ventas de prueba.','Cargar',()=>{demo();save();render();toast('Datos de ejemplo cargados')}),
+  demo:()=>ask('Cargar datos de ejemplo','Esto reemplaza lo que tienes ahora por productos y ventas de prueba.','Cargar',()=>{demo();migrateLots();save();render();toast('Datos de ejemplo cargados')}),
   wipe:()=>ask('¿Borrar todo?','Se eliminarán productos, ventas y ajustes de este dispositivo. No se puede deshacer.','Borrar todo',()=>{const s=state.store;state=blank();state.store=s;state.onboarded=true;save();applyTheme();render();toast('Datos borrados')},true),
   confirm:()=>{closeSheet();confirmCb&&confirmCb()},
   sheetclose:()=>closeSheet(),
-  start:()=>{state.store=$('#onbname').value.trim()||'Mi tienda';state.storeImg=onbImg;state.onboarded=true;save();$('#onb').classList.remove('on');render()},
-  startdemo:()=>{state.store=$('#onbname').value.trim()||'Mi tienda';state.storeImg=onbImg;demo();state.onboarded=true;save();$('#onb').classList.remove('on');render()}
+  start:()=>{state.store=$('#onbname').value.trim()||'Mi tienda';state.storeImg=onbImg;state.onboarded=true;save();renameActiveStore(state.store);$('#onb').classList.remove('on');render()},
+  startdemo:()=>{state.store=$('#onbname').value.trim()||'Mi tienda';state.storeImg=onbImg;demo();migrateLots();state.onboarded=true;save();renameActiveStore(state.store);$('#onb').classList.remove('on');render()}
 };
 document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const f=ACT[el.dataset.act];if(f)f(el.dataset.id,el)});
 document.addEventListener('input',e=>{
   const el=e.target;
   if(el.id==='q'){ui.q=el.value;$('#grid').innerHTML=gridHTML();return}
+  if(el.id==='sq'){ui.sq=el.value;const l=$('#saleslist');if(l)l.innerHTML=salesListHTML();return}
+  if(el.id==='sdfrom'){ui.sFrom=el.value;const l=$('#saleslist');if(l)l.innerHTML=salesListHTML();return}
+  if(el.id==='sdto'){ui.sTo=el.value;const l=$('#saleslist');if(l)l.innerHTML=salesListHTML();return}
+  if(el.id==='es-q'||el.id==='es-p'||el.id==='es-c'){
+    const q=Math.max(1,parseInt($('#es-q').value)||1),pr=num($('#es-p').value),c=num($('#es-c').value);
+    const t=$('#es-tot');if(t)t.textContent=money(q*pr);
+    const pf=$('#es-prof');if(pf){const prof=q*(pr-c);pf.textContent=sgn(prof)+' '+state.cur;pf.style.color=prof>=0?'var(--good)':'var(--bad)'}
+    return;
+  }
   if(!ov)return;const f=el.dataset.f;if(!f)return;
   if(ov.type==='form'){if(f==='v')draft.variants[+el.dataset.i][el.dataset.k]=el.value;else{draft[f]=el.value;if(f==='cost'||f==='price')margin()}}
   else if(ov.type==='detail'&&f==='price'){ov.price=el.value;sellDom()}
@@ -818,7 +1000,7 @@ document.addEventListener('change',e=>{
 });
 $('#imp').addEventListener('change',e=>{
   const f=e.target.files[0];e.target.value='';if(!f)return;
-  const fr=new FileReader();fr.onload=()=>{try{const s=JSON.parse(fr.result);if(!Array.isArray(s.products)||!Array.isArray(s.sales))throw 0;state=Object.assign(blank(),s,{onboarded:true});save();applyTheme();render();toast('Respaldo importado')}catch(err){toast('Ese archivo no es un respaldo válido')}};fr.readAsText(f);
+  const fr=new FileReader();fr.onload=()=>{try{const s=JSON.parse(fr.result);if(!Array.isArray(s.products)||!Array.isArray(s.sales))throw 0;state=Object.assign(blank(),s,{onboarded:true});migrateLots();save();applyTheme();render();toast('Respaldo importado')}catch(err){toast('Ese archivo no es un respaldo válido')}};fr.readAsText(f);
 });
 
 /* ---------- bienvenida ---------- */
@@ -832,6 +1014,24 @@ function showOnb(){
   $('#onb').classList.add('on');
 }
 function updateOnbPhoto(){const b=$('#onbphoto');if(b){b.innerHTML=onbImg?`<img src="${onbImg}" alt="">`:ic('camera');b.classList.toggle('has',!!onbImg)}}
+
+/* ---------- botón atrás de Android: navega entre pantallas, no cierra la app ---------- */
+function handleBack(){
+  if($('#lb').classList.contains('on')){ACT.closelb();return}
+  if($('#crop').classList.contains('on')){ACT.cropcancel();return}
+  if($('#sh').classList.contains('on')){closeSheet();return}
+  if($('#onb').classList.contains('on'))return;
+  if(ov){closeOv();return}
+  if(ui.tab!=='home'){ui.tab='home';render();$('#view').scrollTop=0;return}
+  /* ya estamos en Inicio y no hay nada más abierto: no cerramos la app */
+}
+try{
+  if(window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.App){
+    window.Capacitor.Plugins.App.addListener('backButton',handleBack);
+  }else{
+    document.addEventListener('backbutton',handleBack,false);
+  }
+}catch(e){}
 
 applyTheme();render();
 if(!state.onboarded)showOnb();
