@@ -45,14 +45,27 @@ jobs:
       - name: Dar permiso de ejecución a gradlew
         run: chmod +x android/gradlew
  
-      - name: Compilar el APK (debug)
-        run: cd android && ./gradlew assembleDebug --no-daemon
+      - name: Compilar el APK
+        run: cd android && ./gradlew assembleRelease --no-daemon
+
+      # Siempre la misma firma (keystore/release.keystore): así cada APK nuevo
+      # se instala encima del anterior sin borrar tus datos. Antes se usaba la
+      # firma de depuración, que GitHub genera nueva en cada compilación y por
+      # eso Android decía que había "conflicto con un paquete existente".
+      - name: Firmar el APK
+        run: |
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          $BT/zipalign -p -f 4 android/app/build/outputs/apk/release/app-release-unsigned.apk alineado.apk
+          $BT/apksigner sign --ks keystore/release.keystore --ks-pass pass:'Tnda#Inv730dcde4' \
+            --ks-key-alias tiendaapp --key-pass pass:'Tnda#Inv730dcde4' \
+            --out Tienda.apk alineado.apk
+          $BT/apksigner verify Tienda.apk
  
       - name: Subir el APK como artefacto
         uses: actions/upload-artifact@v4
         with:
-          name: tienda-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: tienda-apk
+          path: Tienda.apk
  
       - name: Publicar en Releases
         if: github.ref == 'refs/heads/main'
@@ -60,6 +73,6 @@ jobs:
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: Tienda v1.0.${{ github.run_number }}
-          files: android/app/build/outputs/apk/debug/app-debug.apk
+          files: Tienda.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
