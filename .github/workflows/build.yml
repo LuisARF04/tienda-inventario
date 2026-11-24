@@ -35,9 +35,15 @@ jobs:
       - name: Sincronizar Capacitor
         run: npx cap sync android
 
+      # La versión es la misma en la app y en Releases: los dos primeros números
+      # salen de package.json (1.0) y el último es el número de compilación,
+      # que sube solo en cada push. Ejemplo: compilación 9 -> 1.0.9.
       - name: Poner la versión real en el APK
         run: |
-          VER=$(node -p "require('./package.json').version")
+          BASE=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")
+          VER="$BASE.${{ github.run_number }}"
+          echo "VER=$VER" >> $GITHUB_ENV
+          echo "Versión: $VER"
           sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/" android/app/build.gradle
           sed -i "s/versionName \"1.0\"/versionName \"$VER\"/" android/app/build.gradle
           grep -n "versionCode\|versionName" android/app/build.gradle
@@ -71,8 +77,8 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: Tienda v1.0.${{ github.run_number }}
+          tag_name: v${{ env.VER }}
+          name: Tienda v${{ env.VER }}
           files: Tienda.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
