@@ -1,6 +1,6 @@
 {
   "name": "tienda-inventario",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "App de inventario y ventas, empaquetada en Android con Capacitor.",
   "private": true,
   "scripts": {
