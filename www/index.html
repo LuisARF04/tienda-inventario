@@ -1098,14 +1098,23 @@ function showOnb(){
 function updateOnbPhoto(){const b=$('#onbphoto');if(b){b.innerHTML=onbImg?`<img src="${onbImg}" alt="">`:ic('camera');b.classList.toggle('has',!!onbImg)}}
 
 /* ---------- botón atrás de Android: navega entre pantallas, no cierra la app ---------- */
+let backArmed=0;
 function handleBack(){
   if($('#lb').classList.contains('on')){ACT.closelb();return}
   if($('#crop').classList.contains('on')){ACT.cropcancel();return}
   if($('#sh').classList.contains('on')){closeSheet();return}
   if($('#onb').classList.contains('on'))return;
-  if(ov){closeOv();return}
+  // Dentro de un producto: al editarlo vuelve a su ficha; en la ficha o en uno nuevo, vuelve a la lista
+  if(ov){if(ov.type==='form'&&ov.id)ACT.formback();else closeOv();return}
+  // En otra pestaña: vuelve a Inicio
   if(ui.tab!=='home'){ui.tab='home';render();$('#view').scrollTop=0;return}
-  /* ya estamos en Inicio y no hay nada más abierto: no cerramos la app */
+  // En Inicio: hay que tocar dos veces seguidas para salir
+  if(Date.now()-backArmed<2000){
+    const A=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.App;
+    if(A&&A.exitApp)A.exitApp();
+    return;
+  }
+  backArmed=Date.now();toast('Toca de nuevo para salir');
 }
 try{
   if(window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.App){
