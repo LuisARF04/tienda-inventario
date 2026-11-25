@@ -37,6 +37,18 @@ jobs:
       - name: Sincronizar Capacitor
         run: npx cap sync android
 
+      # Actualizador interno: descarga el APK nuevo dentro de la app y abre el
+      # instalador de Android sin pasar por el navegador (código en native/).
+      - name: Agregar el actualizador interno
+        run: |
+          set -e
+          PKG=android/app/src/main/java/com/tienda/inventario
+          test -d "$PKG"
+          cp native/ApkUpdaterPlugin.java native/UpdateFileProvider.java native/MainActivity.java "$PKG/"
+          mkdir -p android/app/src/main/res/xml
+          cp native/update_paths.xml android/app/src/main/res/xml/update_paths.xml
+          python3 scripts/add_updater.py android/app/src/main/AndroidManifest.xml
+
       # La versión es la misma en la app y en Releases. Sale de package.json:
       # si ahí dice 1.1.0, esta compilación es 1.1.0 y cada push siguiente
       # suma 1 al último número (1.1.1, 1.1.2...). Al cambiar la versión en
