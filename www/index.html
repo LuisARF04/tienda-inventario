@@ -37,6 +37,7 @@ h2,h3,p{margin:0}
 .tb-ind{position:absolute;top:6px;bottom:6px;left:0;width:0;border-radius:999px;background:var(--accent-soft);transition:transform .25s cubic-bezier(.2,.8,.2,1),width .25s cubic-bezier(.2,.8,.2,1);z-index:0}
 .tb{position:relative;z-index:1;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:0 2px;color:var(--muted);font-size:10.5px;font-weight:600;transition:color .2s;text-align:center;line-height:1.15}
 .tb.on{color:var(--accent)}
+.tb.upd::after{content:'';position:absolute;top:7px;left:calc(50% + 7px);width:8px;height:8px;border-radius:50%;background:var(--bad);border:2px solid var(--sheet)}
 .tb svg{transition:transform .2s}
 .tb.on svg{stroke:var(--accent);animation:tbPop .22s cubic-bezier(.2,.8,.2,1)}
 @keyframes tbPop{from{transform:scale(.8)}to{transform:scale(1)}}
@@ -286,7 +287,7 @@ textarea.inp{min-height:84px;resize:none}
 <div id="app">
   <div id="view" class="sheet"></div>
   <nav class="tabbar" id="tabs"></nav>
-  <button class="fab" id="fab" data-act="new" aria-label="Agregar producto"></button>
+  <button class="fab" id="fab" data-act="fabmenu" aria-label="Agregar"></button>
   <div id="ov"></div>
   <div id="sh"><div class="bd" data-act="sheetclose"></div><div id="shp" class="panel"></div></div>
   <div id="onb"></div>
@@ -473,7 +474,7 @@ function render(){
   v.innerHTML=ui.tab==='home'?homeHTML():ui.tab==='inv'?invHTML():ui.tab==='sales'?salesHTML():moreHTML();
   const prevInd=$('#tbInd'),prevStyle=prevInd?{w:prevInd.style.width,t:prevInd.style.transform}:null;
   $('#tabs').innerHTML='<div class="tb-ind" id="tbInd"></div>'+[['home','Inicio','home'],['inv','Inventario','box'],['sales','Ventas','receipt'],['more','Configuración','grid']]
-    .map(([k,l,i])=>`<button class="tb ${ui.tab===k?'on':''}" data-act="tab" data-id="${k}">${ic(i)}<span>${l}</span></button>`).join('');
+    .map(([k,l,i])=>`<button class="tb ${ui.tab===k?'on':''} ${k==='more'&&UPD.state==='available'?'upd':''}" data-act="tab" data-id="${k}">${ic(i)}<span>${l}</span></button>`).join('');
   $('#fab').classList.add('on');
   $('#fab').innerHTML=ic('plus');
   if(ui.tab==='more'&&state.storeId)refreshLinks();
@@ -604,6 +605,11 @@ function moreHTML(){
   const seg=(items,cur,act)=>`<div class="seg">${items.map(([k,l])=>`<button class="${cur===k?'on':''}" data-act="${act}" data-id="${k}">${l}</button>`).join('')}</div>`;
   return `<div class="profile"><div class="avatar">${state.storeImg?`<img src="${state.storeImg}" alt="">`:esc((state.store.trim()[0]||'T').toUpperCase())}</div><h2>${esc(state.store)}</h2>
     <p class="muted">${state.products.length} productos y ${state.sales.length} ventas</p></div>
+    <div class="opt"><div>${ic('down')}<span>Versión ${APP_VERSION==='dev'?'de prueba':APP_VERSION}</span></div>
+      <p class="muted" style="margin:0 0 12px;font-size:13px">${updText()}</p>
+      ${UPD.state==='available'?`<button class="btn full" data-act="dlupd">Descargar ${UPD.latest}</button>`
+        :`<button class="btn ghost full" data-act="checkupd" ${UPD.state==='checking'?'disabled':''}>${UPD.state==='checking'?'Buscando…':'Buscar actualización'}</button>`}
+    </div>
     <button class="mrow" data-act="editstore">${ic('store')}<span>Datos de la tienda</span>${ic('chev')}</button>
     <button class="mrow" data-act="switchstore">${ic('store')}<span>Cambiar o crear tienda</span>${ic('chev')}</button>
     <button class="mrow" data-act="sharelist">${ic('share')}<span>Compartir lista de disponibles</span>${ic('chev')}</button>
@@ -630,6 +636,7 @@ function renderOv(){
   o.innerHTML=ov.type==='detail'?detailHTML():formHTML();
   if(!o.innerHTML)return;
   const n=$('.sheet',o);if(n)n.scrollTop=y;
+  if(ov.type==='detail')sellDom();
   setTimeout(()=>o.classList.remove('enter'),320);
 }
 function detailHTML(){
@@ -653,6 +660,8 @@ function detailHTML(){
     <div class="h4">Precio de venta por unidad</div>
     <input class="inp" data-f="price" inputmode="decimal" value="${esc(ov.price)}" autocomplete="off">
     <div class="mg" id="sellmg" style="margin:10px 0 0"></div>
+    <div class="h4">Fecha de la venta</div>
+    <input class="inp" type="date" data-f="sdate" value="${ov.sdate||todayYMD()}" max="${todayYMD()}">
     <div class="h4">Resumen del producto</div>
     <div class="fin"><div><span>Compra${availLots.length>1?' (lote)':''}</span><b>${fmt(lot?lot.cost:p.cost)}</b></div><div><span>Vendidos</span><b>${sum(S,s=>s.qty)}</b></div><div><span>Ganancia total</span><b style="color:${prof>=0?'var(--good)':'var(--bad)'}">${sgn(prof)}</b></div></div>
     ${p.desc?`<div class="h4">Notas</div><p class="desc">${esc(p.desc)}</p>`:''}
@@ -699,10 +708,55 @@ function margin(){
 /* ---------- hojas inferiores ---------- */
 function openSheet(h){$('#shp').innerHTML=h;$('#sh').classList.add('on')}
 function closeSheet(){$('#sh').classList.remove('on')}
+const todayYMD=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+
+/* ---------- actualizaciones desde GitHub Releases ---------- */
+const APP_VERSION='dev'; // al compilar, el workflow pone aquí la versión real (la misma de Releases)
+const GH_REPO='LuisARF04/tienda-inventario';
+const UPD={state:'idle',latest:null,url:null,msg:''};
+const verParts=v=>String(v).split('.').map(n=>parseInt(n,10)||0);
+function isNewer(a,b){const x=verParts(a),y=verParts(b);for(let i=0;i<Math.max(x.length,y.length);i++){const d=(x[i]||0)-(y[i]||0);if(d)return d>0}return false}
+function updText(){return{idle:'Busca si hay una versión nueva',checking:'Buscando…',latest:'Tienes la última versión',available:'Hay una versión nueva: '+UPD.latest,error:UPD.msg}[UPD.state]}
+function updDot(){const b=document.querySelector('.tb[data-id="more"]');if(b)b.classList.toggle('upd',UPD.state==='available')}
+async function checkUpdate(silent){
+  UPD.state='checking';if(!silent&&ui.tab==='more')render();
+  try{
+    const r=await fetch(`https://api.github.com/repos/${GH_REPO}/releases/latest`,{headers:{Accept:'application/vnd.github+json'},cache:'no-store'});
+    if(!r.ok)throw new Error(r.status===404?'Todavía no hay versiones publicadas':'GitHub respondió con error '+r.status);
+    const d=await r.json(),m=/(\d+(?:\.\d+)+)/.exec(d.tag_name||d.name||''),apk=(d.assets||[]).find(a=>/\.apk$/i.test(a.name));
+    UPD.latest=m?m[1]:null;UPD.url=apk?apk.browser_download_url:d.html_url;
+    UPD.state=UPD.latest&&APP_VERSION!=='dev'&&isNewer(UPD.latest,APP_VERSION)?'available':'latest';
+  }catch(e){UPD.state=silent?'idle':'error';UPD.msg=e instanceof TypeError?'Sin conexión a internet':e.message}
+  if(silent&&UPD.state==='available')toast(`Versión ${UPD.latest} disponible en Configuración`);
+  if(!silent||ui.tab==='more')render();else updDot();
+}
+function downloadUpdate(){
+  const Br=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.Browser;
+  try{if(Br)Br.open({url:UPD.url});else window.open(UPD.url,'_blank')}catch(e){location.href=UPD.url}
+  toast('Cuando termine la descarga, toca el archivo para instalar');
+}
+function salePickHTML(q){
+  q=(q||'').trim().toLowerCase();
+  const L=state.products.filter(p=>stock(p)>0&&(!q||p.name.toLowerCase().includes(q)));
+  if(!L.length)return'<p class="muted" style="text-align:center;padding:16px 0">Ningún producto coincide</p>';
+  return L.map(p=>`<button class="row" data-act="salepick" data-id="${p.id}"><div class="th sm">${p.img?`<img src="${p.img}" alt="">`:`<span>${catE(p.cat)}</span>`}</div><div class="rm"><div class="rn">${esc(p.name)}</div><div class="rs">${stock(p)} disp.</div></div><div class="rr"><b>${fmt(p.price)}</b></div></button>`).join('');
+}
 function ask(t,m,yes,cb,danger){confirmCb=cb;openSheet(`<h3>${t}</h3><p class="muted">${m}</p><div class="btnrow"><button class="btn ghost" data-act="sheetclose">Cancelar</button><button class="btn ${danger?'danger':''}" data-act="confirm">${yes}</button></div>`)}
 
 /* ---------- acciones ---------- */
 const ACT={
+  fabmenu:()=>openSheet(`<h3 style="margin-bottom:16px">¿Qué quieres agregar?</h3>
+    <button class="mrow" data-act="newsale">${ic('receipt')}<span>Nueva venta</span>${ic('chev')}</button>
+    <button class="mrow" data-act="fabnewprod">${ic('box')}<span>Nuevo producto</span>${ic('chev')}</button>`),
+  fabnewprod:()=>{closeSheet();ACT.new()},
+  newsale:()=>{
+    if(!state.products.some(p=>stock(p)>0)){closeSheet();return toast('No hay productos con stock para vender')}
+    openSheet(`<h3>Nueva venta</h3><p class="muted">Elige el producto que vendiste.</p>
+      <div class="search">${ic('search')}<input id="saleq" placeholder="Buscar producto" autocomplete="off"></div>
+      <div id="salepick">${salePickHTML('')}</div>`)},
+  salepick:id=>{closeSheet();ACT.open(id)},
+  checkupd:()=>checkUpdate(false),
+  dlupd:()=>downloadUpdate(),
   tab:id=>{ui.tab=id;render();$('#view').scrollTop=0},
   period:id=>{ui.period=id;render()},
   speriod:id=>{ui.speriod=id;render()},
@@ -783,10 +837,13 @@ const ACT={
     if(!v||!lot||ov.qty<1||ov.qty>lot.qty)return toast('No hay suficiente stock en ese lote');
     const price=num(ov.price);if(price<=0)return toast('Escribe el precio de venta');
     lot.qty-=ov.qty;v.qty=sum(v.lots,l=>l.qty);
-    const sale={id:uid(),pid:p.id,vid:v.id,lotId:lot.id,name:p.name,variant:vlabel(v),qty:ov.qty,cost:lot.cost,price,date:new Date().toISOString()};
-    state.sales.unshift(sale);
+    // Fecha elegida (si es un día anterior a hoy se guarda ese día, a la hora actual)
+    const sd=ov.sdate&&ov.sdate<todayYMD()?ov.sdate:null;let when=new Date();
+    if(sd){const [y,m,d]=sd.split('-').map(Number);when=new Date(y,m-1,d,when.getHours(),when.getMinutes(),when.getSeconds())}
+    const sale={id:uid(),pid:p.id,vid:v.id,lotId:lot.id,name:p.name,variant:vlabel(v),qty:ov.qty,cost:lot.cost,price,date:when.toISOString()};
+    state.sales.unshift(sale);state.sales.sort((a,b)=>b.date.localeCompare(a.date));
     save();const sold=ov.qty,nv=p.variants.find(x=>x.qty>0);
-    ov.vid=(nv||v).id;ov.lotId=null;ov.qty=1;renderOv();sellDom();toast(`Venta registrada: ${fmt(price*sold)} ${state.cur}`);
+    ov.vid=(nv||v).id;ov.lotId=null;ov.qty=1;renderOv();sellDom();toast(`Venta registrada: ${fmt(price*sold)} ${state.cur}${sd?' ('+sd.split('-').reverse().join('/')+')':''}`);
     pushSale(sale);
   },
   restock:()=>{const p=prod(ov.id);restockCurr=state.cur;
@@ -861,9 +918,10 @@ const ACT={
   sharelist:async()=>{
     const avail=state.products.filter(p=>stock(p)>0);
     if(!avail.length)return toast('No hay productos disponibles para compartir');
-    let text=`*${state.store}* — productos disponibles\n\n`;
-    avail.forEach(p=>{text+=`• ${p.name} — ${stock(p)} disp. — ${fmt(p.price)} ${state.cur}\n`});
-    text+=`\nActualizado: ${new Date().toLocaleDateString('es')}`;
+    const hoy=new Date(),fecha=String(hoy.getDate()).padStart(2,'0')+'/'+String(hoy.getMonth()+1).padStart(2,'0')+'/'+hoy.getFullYear();
+    let text=`${state.store}: Productos Disponibles\n`;
+    avail.forEach(p=>{text+=`· ${p.name} – ${stock(p)} disp. – ${fmt(p.price)} ${state.cur}\n`});
+    text+=`Actualizado: ${fecha}`;
     try{if(navigator.share){await navigator.share({text,title:state.store});return}}catch(e){}
     try{window.open('https://wa.me/?text='+encodeURIComponent(text),'_blank')}catch(e){location.href='https://wa.me/?text='+encodeURIComponent(text)}
   },
@@ -896,6 +954,7 @@ document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if
 document.addEventListener('input',e=>{
   const el=e.target;
   if(el.id==='q'){ui.q=el.value;$('#grid').innerHTML=gridHTML();return}
+  if(el.id==='saleq'){$('#salepick').innerHTML=salePickHTML(el.value);return}
   if(el.id==='sq'){ui.sq=el.value;const l=$('#saleslist');if(l)l.innerHTML=salesListHTML();return}
   if(el.id==='sdfrom'){ui.sFrom=el.value;const l=$('#saleslist');if(l)l.innerHTML=salesListHTML();return}
   if(el.id==='sdto'){ui.sTo=el.value;const l=$('#saleslist');if(l)l.innerHTML=salesListHTML();return}
@@ -908,6 +967,7 @@ document.addEventListener('input',e=>{
   if(!ov)return;const f=el.dataset.f;if(!f)return;
   if(ov.type==='form'){if(f==='v')draft.variants[+el.dataset.i][el.dataset.k]=el.value;else{draft[f]=el.value;if(f==='cost'||f==='price')margin()}}
   else if(ov.type==='detail'&&f==='price'){ov.price=el.value;sellDom()}
+  else if(ov.type==='detail'&&f==='sdate'){ov.sdate=el.value}
 });
 $('#file').addEventListener('change',e=>{
   const f=e.target.files[0];e.target.value='';if(!f)return;
@@ -933,6 +993,7 @@ async function pushSale(s){
     await sb.from('sales').insert({
       store_id:state.storeId,
       external_id:s.id,
+      created_at:s.date,
       total:Math.round(s.qty*s.price*100)/100,
       payment_method:'Efectivo',
       items:[{name:s.name,variant:s.variant,qty:s.qty,price:s.price,cost:s.cost}]
@@ -1057,6 +1118,7 @@ try{
 applyTheme();render();
 if(!state.onboarded)showOnb();
 if(sb)ensureAuth();
+setTimeout(()=>checkUpdate(true),2500);
 })();
 </script>
 </body>

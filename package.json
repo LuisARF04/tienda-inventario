@@ -1,6 +1,6 @@
 {
   "name": "tienda-inventario",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "App de inventario y ventas, empaquetada en Android con Capacitor.",
   "private": true,
   "scripts": {
@@ -8,7 +8,8 @@
   },
   "dependencies": {
     "@capacitor/android": "^6.1.2",
-    "@capacitor/core": "^6.1.2"
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/browser": "^6.0.0"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.1.2"

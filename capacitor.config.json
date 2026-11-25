@@ -1,6 +1,6 @@
 {
   "appId": "com.tienda.inventario",
-  "appName": "Tienda",
+  "appName": "Inventario",
   "webDir": "www",
   "bundledWebRuntime": false,
   "android": {

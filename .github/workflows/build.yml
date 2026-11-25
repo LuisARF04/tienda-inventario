@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Descargar el código
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
  
       - name: Preparar Node.js
         uses: actions/setup-node@v4
@@ -35,19 +37,26 @@ jobs:
       - name: Sincronizar Capacitor
         run: npx cap sync android
 
-      # La versión es la misma en la app y en Releases: los dos primeros números
-      # salen de package.json (1.0) y el último es el número de compilación,
-      # que sube solo en cada push. Ejemplo: compilación 9 -> 1.0.9.
+      # La versión es la misma en la app y en Releases. Sale de package.json:
+      # si ahí dice 1.1.0, esta compilación es 1.1.0 y cada push siguiente
+      # suma 1 al último número (1.1.1, 1.1.2...). Al cambiar la versión en
+      # package.json (por ejemplo a 1.2.0) la cuenta empieza de nuevo desde ahí.
       - name: Poner la versión real en el APK
         run: |
-          BASE=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")
-          VER="$BASE.${{ github.run_number }}"
+          BASE=$(node -p "require('./package.json').version")
+          DESDE=$(git log -1 --format=%H -G'"version"' -- package.json)
+          N=$( [ -n "$DESDE" ] && git rev-list --count "$DESDE"..HEAD || echo 0 )
+          VER=$(node -p "const v='$BASE'.split('.').map(Number);v[2]=(v[2]||0)+$N;v.join('.')")
           echo "VER=$VER" >> $GITHUB_ENV
           echo "Versión: $VER"
           sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/" android/app/build.gradle
           sed -i "s/versionName \"1.0\"/versionName \"$VER\"/" android/app/build.gradle
           grep -n "versionCode\|versionName" android/app/build.gradle
- 
+          # La app muestra su versión en Configuración y la compara con Releases
+          F=android/app/src/main/assets/public/index.html
+          sed -i "s/const APP_VERSION='dev'/const APP_VERSION='$VER'/" $F
+          grep -q "const APP_VERSION='$VER'" $F
+
       - name: Dar permiso de ejecución a gradlew
         run: chmod +x android/gradlew
  
@@ -64,21 +73,21 @@ jobs:
           $BT/zipalign -p -f 4 android/app/build/outputs/apk/release/app-release-unsigned.apk alineado.apk
           $BT/apksigner sign --ks keystore/release.keystore --ks-pass pass:'Tnda#Inv730dcde4' \
             --ks-key-alias tiendaapp --key-pass pass:'Tnda#Inv730dcde4' \
-            --out Tienda.apk alineado.apk
-          $BT/apksigner verify Tienda.apk
+            --out Inventario.apk alineado.apk
+          $BT/apksigner verify Inventario.apk
  
       - name: Subir el APK como artefacto
         uses: actions/upload-artifact@v4
         with:
-          name: tienda-apk
-          path: Tienda.apk
+          name: inventario-apk
+          path: Inventario.apk
  
       - name: Publicar en Releases
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VER }}
-          name: Tienda v${{ env.VER }}
-          files: Tienda.apk
+          name: Inventario v${{ env.VER }}
+          files: Inventario.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
