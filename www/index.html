@@ -620,8 +620,8 @@ function moreHTML(){
     </div>
     <div class="opt"><div>${ic('palette')}<span>Apariencia</span></div>${seg([['auto','Automático'],['light','Claro'],['dark','Oscuro']],state.theme,'theme')}</div>
     <div class="opt"><div>${ic('coin')}<span>Moneda</span></div>${seg(CURS.map(c=>[c,c]),state.cur,'cur')}</div>
-    <button class="mrow" data-act="export">${ic('down')}<span>Exportar respaldo</span>${ic('chev')}</button>
-    <button class="mrow" data-act="import">${ic('up')}<span>Importar respaldo</span>${ic('chev')}</button>
+    <button class="mrow" data-act="export">${ic('up')}<span>Exportar respaldo</span>${ic('chev')}</button>
+    <button class="mrow" data-act="import">${ic('down')}<span>Importar respaldo</span>${ic('chev')}</button>
     <button class="mrow" data-act="demo">${ic('sparkle')}<span>Cargar datos de ejemplo</span>${ic('chev')}</button>
     <button class="mrow red" data-act="wipe">${ic('trash')}<span>Borrar todos los datos</span>${ic('chev')}</button>`;
 }
@@ -782,6 +782,21 @@ try{const A=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins
     const U=apkPlugin();if(!U)return;
     try{const c=await U.canInstall();if(c&&c.allowed){UPD.waitPerm=false;installUpdate()}}catch(e){}
   })}catch(e){}
+// Respaldo: en la app abre "Guardar como" de Android (plugin FileSaver) para elegir dónde guardarlo
+async function exportBackup(){
+  const d=new Date(),f=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const tienda=(state.store||'tienda').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-zA-Z0-9]+/g,'-').replace(/^-|-$/g,'').toLowerCase()||'tienda';
+  const fileName=`inventario-${tienda}-${f}.json`,data=JSON.stringify(state);
+  const FS=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.FileSaver;
+  if(FS){
+    try{const r=await FS.save({fileName,mimeType:'application/json',data});
+      toast(r&&r.saved?'Respaldo guardado':'No se guardó el respaldo')}
+    catch(e){toast((e&&e.message)||'No se pudo guardar el respaldo')}
+    return;
+  }
+  // En el navegador (pruebas): descarga normal
+  const b=new Blob([data],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=fileName;document.body.appendChild(a);a.click();a.remove();toast('Respaldo descargado');
+}
 function salePickHTML(q){
   q=(q||'').trim().toLowerCase();
   const L=state.products.filter(p=>stock(p)>0&&(!q||p.name.toLowerCase().includes(q)));
@@ -989,7 +1004,7 @@ const ACT={
     const {error}=await sb.from('store_links').update({status:'revoked',decided_at:new Date().toISOString()}).eq('id',id);
     if(!error){toast('Acceso revocado');refreshLinks()}
   },true),
-  export:()=>{const b=new Blob([JSON.stringify(state)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='inventario-respaldo.json';document.body.appendChild(a);a.click();a.remove();toast('Respaldo exportado')},
+  export:()=>exportBackup(),
   import:()=>$('#imp').click(),
   demo:()=>ask('Cargar datos de ejemplo','Esto reemplaza lo que tienes ahora por productos y ventas de prueba.','Cargar',()=>{demo();migrateLots();save();render();toast('Datos de ejemplo cargados')}),
   wipe:()=>ask('¿Borrar todo?','Se eliminarán productos, ventas y ajustes de este dispositivo. No se puede deshacer.','Borrar todo',()=>{const s=state.store;state=blank();state.store=s;state.onboarded=true;save();applyTheme();render();toast('Datos borrados')},true),

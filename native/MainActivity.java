@@ -8,6 +8,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         // Plugins propios de la app (código en esta misma carpeta)
         registerPlugin(ApkUpdaterPlugin.class);
+        registerPlugin(FileSaverPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

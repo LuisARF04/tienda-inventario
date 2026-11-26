@@ -44,7 +44,7 @@ jobs:
           set -e
           PKG=android/app/src/main/java/com/tienda/inventario
           test -d "$PKG"
-          cp native/ApkUpdaterPlugin.java native/UpdateFileProvider.java native/MainActivity.java "$PKG/"
+          cp native/ApkUpdaterPlugin.java native/FileSaverPlugin.java native/UpdateFileProvider.java native/MainActivity.java "$PKG/"
           mkdir -p android/app/src/main/res/xml
           cp native/update_paths.xml android/app/src/main/res/xml/update_paths.xml
           python3 scripts/add_updater.py android/app/src/main/AndroidManifest.xml
